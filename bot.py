@@ -15,9 +15,7 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 
-# Кнопки
-register_url = "https://u3.shortink.io/register?utm_campaign=819083&utm_source=affiliate&utm_medium=sr&a=Df4ek3JlsrzSid&ac=tgchanel&code=50START"
-
+# Клавиатуры (кнопку регистрации полностью убрали)
 lang_kb = InlineKeyboardMarkup().add(
     InlineKeyboardButton("🇺🇦 Українська", callback_data="lang_uk"),
     InlineKeyboardButton("🇬🇧 English", callback_data="lang_en")
@@ -28,13 +26,6 @@ strategy_btn_uk = InlineKeyboardMarkup().add(
 )
 strategy_btn_en = InlineKeyboardMarkup().add(
     InlineKeyboardButton("📘 Get strategy", callback_data="strategy_en")
-)
-
-register_btn = InlineKeyboardMarkup().add(
-    InlineKeyboardButton("🔗 Зареєструватися", url=register_url)
-)
-register_btn_en = InlineKeyboardMarkup().add(
-    InlineKeyboardButton("🔗 Register", url=register_url)
 )
 
 user_lang = {}
@@ -52,12 +43,12 @@ async def set_language(callback_query: types.CallbackQuery):
     await bot.answer_callback_query(callback_query.id)
     
     if lang == 'uk':
-        msg_text = "Привіт! Це PocketSignal1D 🤖\n\nЯ надсилатиму тобі реальні сигнали на основі Облака Ішимоку.\n\nПочни із реєстрації:"
-        await bot.send_message(callback_query.from_user.id, msg_text, reply_markup=register_btn)
+        msg_text = "Привіт! Це PocketSignal1D 🤖\n\nЯ надсилатиму тобі реальні сигнали на основі Облака Ішимоку."
+        await bot.send_message(callback_query.from_user.id, msg_text)
         await bot.send_message(callback_query.from_user.id, "📘 Хочеш дізнатися просту стратегію?", reply_markup=strategy_btn_uk)
     else:
-        msg_text = "Hi! This is PocketSignal1D 🤖\n\nI will send you real signals based on Ichimoku Cloud.\n\nStart with registration:"
-        await bot.send_message(callback_query.from_user.id, msg_text, reply_markup=register_btn_en)
+        msg_text = "Hi! This is PocketSignal1D 🤖\n\nI will send you real signals based on Ichimoku Cloud."
+        await bot.send_message(callback_query.from_user.id, msg_text)
         await bot.send_message(callback_query.from_user.id, "📘 Want a simple strategy?", reply_markup=strategy_btn_en)
 
 @dp.callback_query_handler(lambda c: c.data == 'strategy_uk')
@@ -86,7 +77,7 @@ async def strategy_info_en(callback_query: types.CallbackQuery):
     )
     await bot.send_message(callback_query.from_user.id, strategy_text)
 
-# --- АНАЛИЗ РЫНКА (ICHIMOKU РУЧНОЙ РАСЧЕТ) ---
+# --- АНАЛИЗ РЫНКА (ICHIMOKU С ЛОГАМИ) ---
 assets = [
     "BTC/USDT", "ETH/USDT", "LTC/USDT", "SOL/USDT", 
     "XRP/USDT", "DOGE/USDT", "ADA/USDT", "DOT/USDT"
@@ -102,46 +93,36 @@ async def analyze_ichimoku(symbol):
             
         df = pd.DataFrame(bars, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         
-        # Чистая математика индикатора Ишимоку без сторонних библиотек
-        # Tenkan-sen (9-period high + 9-period low) / 2
+        # Расчет Ишимоку
         nine_high = df['high'].rolling(window=9).max()
         nine_low = df['low'].rolling(window=9).min()
         df['tenkan'] = (nine_high + nine_low) / 2
 
-        # Kijun-sen (26-period high + 26-period low) / 2
         twentysix_high = df['high'].rolling(window=26).max()
         twentysix_low = df['low'].rolling(window=26).min()
         df['kijun'] = (twentysix_high + twentysix_low) / 2
 
-        # Senkou Span A (Tenkan + Kijun) / 2, сдвинутый вперед на 26 периодов
         df['span_a'] = ((df['tenkan'] + df['kijun']) / 2).shift(26)
 
-        # Senkou Span B (52-period high + 52-period low) / 2, сдвинутый вперед на 26 периодов
         fiftytwo_high = df['high'].rolling(window=52).max()
         fiftytwo_low = df['low'].rolling(window=52).min()
         df['span_b'] = ((fiftytwo_high + fiftytwo_low) / 2).shift(26)
 
-        # Проверяем, что все строки рассчитались
         if df['span_b'].isna().iloc[-1] or df['span_a'].isna().iloc[-1]:
             return None
 
-        # Текущие значения
         last_close = df['close'].iloc[-1]
         tenkan = df['tenkan'].iloc[-1]
         kijun = df['kijun'].iloc[-1]
         span_a = df['span_a'].iloc[-1]
         span_b = df['span_b'].iloc[-1]
         
-        # Предыдущие значения для фиксации пересечения (кросса)
         prev_tenkan = df['tenkan'].iloc[-2]
         prev_kijun = df['kijun'].iloc[-2]
 
-        # Логика сигналов
-        # Золотой крест выше Облака
         if prev_tenkan <= prev_kijun and tenkan > kijun and last_close > max(span_a, span_b):
             return "UP"
         
-        # Мертвый крест ниже Облака
         elif prev_tenkan >= prev_kijun and tenkan < kijun and last_close < min(span_a, span_b):
             return "DOWN"
             
@@ -152,9 +133,12 @@ async def analyze_ichimoku(symbol):
 async def market_scanner():
     while True:
         if not registered_users:
+            logging.info("Сканирование отложено: в боте пока нет активных пользователей.")
             await asyncio.sleep(10)
             continue
             
+        logging.info(f"Запуск сканирования рынка для {len(assets)} активов...")
+        
         for asset in assets:
             direction = await analyze_ichimoku(asset)
             
@@ -173,11 +157,13 @@ async def market_scanner():
                             signal = f"📊 *NEW SIGNAL (Ichimoku)*\n\n🔹 *Asset:* {clean_asset}\n🔹 *Direction:* {dir_text}\n🔹 *Expiration:* {time_exp} min.\n\n⚠️ _Analysis executed on 1m timeframe._"
                         
                         await bot.send_message(chat_id, signal, parse_mode="Markdown")
+                        logging.info(f"Сигнал по {clean_asset} успешно отправлен пользователю {chat_id}")
                     except Exception as e:
                         logging.error(f"Ошибка отправки сообщения {chat_id}: {e}")
             
             await asyncio.sleep(2)
                         
+        logging.info("Круг сканирования завершен. Ожидание 20 секунд...")
         await asyncio.sleep(20)
 
 @dp.message_handler()
